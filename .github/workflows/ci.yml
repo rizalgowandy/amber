@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    tags:
+      - "v1.*"
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  specs-linux:
+    name: Specs — Crystal ${{ matrix.crystal }} on Linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crystal: ["1.20.3", "latest"]
+    services:
+      # The suite needs a local redis: the redis session store and pubsub
+      # specs connect at load time.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal }}
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Check formatting
+        run: crystal tool format --check src spec
+
+      - name: Run specs
+        run: crystal spec
+
+  specs-macos:
+    name: Specs — Crystal latest on macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Service containers are Linux-only; start redis directly.
+      - name: Start redis
+        run: |
+          brew install redis
+          redis-server --daemonize yes
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Run specs
+        run: crystal spec
+
+  granite:
+    name: Granite build spec — Crystal latest
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          # Trust auth: the generated app's database.yml connects as the
+          # postgres user without a password, and `amber db` creates its own
+          # databases.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Run granite build spec
+        run: crystal spec spec/build_spec_granite.cr
